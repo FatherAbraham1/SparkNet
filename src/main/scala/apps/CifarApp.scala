@@ -1,6 +1,7 @@
 package apps
 
 import java.io._
+import scala.util.Random
 
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
@@ -36,26 +37,13 @@ object CifarApp {
 
     val sc = new SparkContext(conf)
     val sqlContext = new org.apache.spark.sql.SQLContext(sc)
-
     val sparkNetHome = sys.env("SPARKNET_HOME")
-
-    // information for logging
-    val startTime = System.currentTimeMillis()
-    val trainingLog = new PrintWriter(new File(sparkNetHome + "/training_log_" + startTime.toString + ".txt" ))
-    def log(message: String, i: Int = -1) {
-      val elapsedTime = 1F * (System.currentTimeMillis() - startTime) / 1000
-      if (i == -1) {
-        trainingLog.write(elapsedTime.toString + ": "  + message + "\n")
-      } else {
-        trainingLog.write(elapsedTime.toString + ", i = " + i.toString + ": "+ message + "\n")
-      }
-      trainingLog.flush()
-    }
+    val logger = new Logger(sparkNetHome + "/training_log_" + System.currentTimeMillis().toString + ".txt")
 
     val loader = new CifarLoader(sparkNetHome + "/caffe/data/cifar10/")
-    log("loading train data")
+    logger.log("loading train data")
     var trainRDD = sc.parallelize(loader.trainImages.zip(loader.trainLabels))
-    log("loading test data")
+    logger.log("loading test data")
     var testRDD = sc.parallelize(loader.testImages.zip(loader.testLabels))
 
     // convert to dataframes
@@ -63,22 +51,22 @@ object CifarApp {
     var trainDF = sqlContext.createDataFrame(trainRDD.map{ case (a, b) => Row(a.map(x => x.toFloat), b)}, schema)
     var testDF = sqlContext.createDataFrame(testRDD.map{ case (a, b) => Row(a.map(x => x.toFloat), b)}, schema)
 
-    log("repartition data")
+    logger.log("repartition data")
     trainDF = trainDF.repartition(numWorkers).cache()
     testDF = testDF.repartition(numWorkers).cache()
 
     val numTrainData = trainDF.count()
-    log("numTrainData = " + numTrainData.toString)
+    logger.log("numTrainData = " + numTrainData.toString)
 
     val numTestData = testDF.count()
-    log("numTestData = " + numTestData.toString)
+    logger.log("numTestData = " + numTestData.toString)
 
     val trainPartitionSizes = trainDF.mapPartitions(iter => Array(iter.size).iterator).persist()
     val testPartitionSizes = testDF.mapPartitions(iter => Array(iter.size).iterator).persist()
     trainPartitionSizes.foreach(size => workerStore.put("trainPartitionSize", size))
     testPartitionSizes.foreach(size => workerStore.put("testPartitionSize", size))
-    log("trainPartitionSizes = " + trainPartitionSizes.collect().deep.toString)
-    log("testPartitionSizes = " + testPartitionSizes.collect().deep.toString)
+    logger.log("trainPartitionSizes = " + trainPartitionSizes.collect().deep.toString)
+    logger.log("testPartitionSizes = " + testPartitionSizes.collect().deep.toString)
 
     val workers = sc.parallelize(Array.range(0, numWorkers), numWorkers)
 
@@ -86,7 +74,6 @@ object CifarApp {
     workers.foreach(_ => {
       val netParam = new NetParameter()
       ReadProtoFromTextFileOrDie(sparkNetHome + "/models/cifar10/cifar10_quick.prototxt", netParam)
-
       val solverParam = new SolverParameter()
       ReadSolverParamsFromTextFileOrDie(sparkNetHome + "/models/cifar10/cifar10_quick_solver.prototxt", solverParam)
       solverParam.clear_net()
@@ -103,13 +90,13 @@ object CifarApp {
 
     var i = 0
     while (true) {
-      log("broadcasting weights", i)
+      logger.log("broadcasting weights", i)
       val broadcastWeights = sc.broadcast(netWeights)
-      log("setting weights on workers", i)
+      logger.log("setting weights on workers", i)
       workers.foreach(_ => workerStore.get[CaffeSolver]("solver").trainNet.setWeights(broadcastWeights.value))
 
       if (i % 5 == 0) {
-        log("testing", i)
+        logger.log("testing", i)
         val testAccuracies = testDF.mapPartitions(
           testIt => {
             val numTestBatches = workerStore.get[Int]("testPartitionSize") / testBatchSize
@@ -118,21 +105,22 @@ object CifarApp {
               val out = workerStore.get[CaffeSolver]("solver").trainNet.forward(testIt)
               accuracy += out("accuracy").get(Array())
             }
-            Array[Float](accuracy / numTestBatches).iterator
+            Array[(Float, Int)]((accuracy, numTestBatches)).iterator
           }
         ).cache()
-        val accuracy = testAccuracies.sum / numWorkers
-        log("%.2f".format(100F * accuracy) + "% accuracy", i)
+        val accuracies = testAccuracies.map{ case (a, b) => a }.sum
+        val numTestBatches = testAccuracies.map{ case (a, b) => b }.sum
+        val accuracy = accuracies / numTestBatches
+        logger.log("%.2f".format(100F * accuracy) + "% accuracy", i)
       }
 
-      log("training", i)
+      logger.log("training", i)
       val syncInterval = 10
       trainDF.foreachPartition(
         trainIt => {
           val t1 = System.currentTimeMillis()
-          val r = scala.util.Random
           val len = workerStore.get[Int]("trainPartitionSize")
-          val startIdx = r.nextInt(len - syncInterval * trainBatchSize)
+          val startIdx = Random.nextInt(len - syncInterval * trainBatchSize)
           val it = trainIt.drop(startIdx)
           val t2 = System.currentTimeMillis()
           print("stuff took " + ((t2 - t1) * 1F / 1000F).toString + " s\n")
@@ -144,13 +132,13 @@ object CifarApp {
         }
       )
 
-      log("collecting weights", i)
+      logger.log("collecting weights", i)
       netWeights = workers.map(_ => { workerStore.get[CaffeSolver]("solver").trainNet.getWeights() }).reduce((a, b) => WeightCollection.add(a, b))
       netWeights.scalarDivide(1F * numWorkers)
-      log("weight = " + netWeights.allWeights("conv1")(0).toFlat()(0).toString, i)
+      logger.log("weight = " + netWeights.allWeights("conv1")(0).toFlat()(0).toString, i)
       i += 1
     }
 
-    log("finished training")
+    logger.log("finished training")
   }
 }
