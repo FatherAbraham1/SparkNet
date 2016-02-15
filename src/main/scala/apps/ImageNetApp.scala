@@ -92,6 +92,7 @@ object ImageNetApp {
       solverParam.set_allocated_net_param(netParam)
 
       // TODO(rkn): use mean preprocessor and random cropping!!!
+      // Caffe.set_mode(Caffe.GPU)
       val solver = new CaffeSolver(solverParam, schema, new DefaultPreprocessor(schema))
       workerStore.put("netParam", netParam) // prevent netParam from being garbage collected
       workerStore.put("solverParam", solverParam) // prevent solverParam from being garbage collected
