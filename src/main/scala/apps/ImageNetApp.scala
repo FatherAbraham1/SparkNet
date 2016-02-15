@@ -35,6 +35,7 @@ object ImageNetApp {
 
   def main(args: Array[String]) {
     val numWorkers = args(0).toInt
+    val s3Bucket = args(1)
     val conf = new SparkConf()
       .setAppName("ImageNet")
       .set("spark.driver.maxResultSize", "30G")
@@ -46,7 +47,7 @@ object ImageNetApp {
     val sparkNetHome = sys.env("SPARKNET_HOME")
     val logger = new Logger(sparkNetHome + "/training_log_" + System.currentTimeMillis().toString + ".txt")
 
-    val loader = new ImageNetLoader("sparknet")
+    val loader = new ImageNetLoader(s3Bucket)
     logger.log("loading train data")
     var trainRDD = loader.apply(sc, "ILSVRC2012_img_train/train.0000", "train.txt")
     logger.log("loading test data")
