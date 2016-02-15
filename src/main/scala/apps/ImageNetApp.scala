@@ -40,7 +40,7 @@ object ImageNetApp {
       .setAppName("ImageNet")
       .set("spark.driver.maxResultSize", "30G")
       .set("spark.task.maxFailures", "1")
-      // may need to add .setExecutorEnv("LD_LIBRARY_PATH", "...")
+      .setExecutorEnv("LD_LIBRARY_PATH", "/usr/local/cuda-7.5/lib64:/root/javacpp-presets/caffe/cppbuild/linux-x86_64/caffe-master/build/lib") // TODO(rkn): get rid of this
 
     val sc = new SparkContext(conf)
     val sqlContext = new org.apache.spark.sql.SQLContext(sc)
