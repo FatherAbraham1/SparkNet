@@ -1,3 +1,4 @@
+/*
 package preprocessing
 
 import org.apache.spark.rdd.RDD
@@ -84,3 +85,4 @@ object ComputeMean {
     caffeLib.save_mean_image(state, meanImage.toFlat(), channels, height, width, filename, filename.length)
   }
 }
+*/

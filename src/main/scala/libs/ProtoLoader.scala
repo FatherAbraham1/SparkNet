@@ -1,3 +1,4 @@
+/*
 // Utilities for loading models from caffe .prototxt files
 
 package libs
@@ -56,3 +57,4 @@ object ProtoLoader {
     return netBuilder.build()
   }
 }
+*/
